@@ -3,48 +3,18 @@ import os
 from pathlib import Path
 
 import joblib
-import pandas as pd
 
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.linear_model import LogisticRegression
+from sklearn.svm import LinearSVC
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
 
+from app.training.train_logistic_regression import load_and_prepare_data, load_combined_data, DATA_PATH
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
-DATA_PATH = PROJECT_ROOT / "app" / "data" / "reviews.csv"
-COMBINED_DATA_PATH = PROJECT_ROOT / "app" / "data" / "combined_reviews.csv"
-MODEL_PATH = PROJECT_ROOT / "app" / "model" / "sentiment_model.joblib"
-
-TEXT_COL = "Review Text"
-RATING_COL = "Rating"
-
-
-def load_and_prepare_data():
-    df = pd.read_csv(DATA_PATH)
-    df = df[[TEXT_COL, RATING_COL]].dropna()
-    df = df[df[RATING_COL] != 3]
-    df["label"] = df[RATING_COL].apply(lambda x: 1 if x >= 4 else 0)
-    X = df[TEXT_COL].astype(str)
-    y = df["label"]
-    return X, y
-
-
-def load_combined_data():
-    """Load the combined dataset produced by combine_datasets.py.
-    Expects columns: text, rating (1,2,4,5 — no 3-stars)."""
-    if not COMBINED_DATA_PATH.exists():
-        raise FileNotFoundError(
-            f"Combined dataset not found at {COMBINED_DATA_PATH}. "
-            "Run: python -m app.training.combine_datasets"
-        )
-    df = pd.read_csv(COMBINED_DATA_PATH, usecols=["text", "rating"])
-    df = df.dropna(subset=["text", "rating"])
-    df["label"] = df["rating"].apply(lambda x: 1 if x >= 4 else 0)
-    X = df["text"].astype(str)
-    y = df["label"]
-    return X, y
+MODEL_PATH = PROJECT_ROOT / "app" / "model" / "sentiment_model_svm.joblib"
 
 
 def train_model(use_combined: bool = False):
@@ -59,6 +29,15 @@ def train_model(use_combined: bool = False):
         stratify=y
     )
 
+    # LinearSVC is fast on sparse TF-IDF data.
+    # CalibratedClassifierCV wraps it to add predict_proba support.
+    svm = LinearSVC(
+        C=0.5,
+        max_iter=2000,
+        class_weight="balanced",
+        random_state=42,
+    )
+
     model = Pipeline([
         ("tfidf", TfidfVectorizer(
             lowercase=True,
@@ -66,13 +45,9 @@ def train_model(use_combined: bool = False):
             ngram_range=(1, 2),
             min_df=3,
             max_df=0.90,
-            max_features=50000
+            max_features=50000,
         )),
-        ("classifier", LogisticRegression(
-            C=0.3,
-            max_iter=1000,
-            class_weight="balanced"
-        ))
+        ("classifier", CalibratedClassifierCV(svm, cv=5)),
     ])
 
     model.fit(X_train, y_train)
@@ -87,7 +62,6 @@ def train_model(use_combined: bool = False):
 
     os.makedirs(MODEL_PATH.parent, exist_ok=True)
     joblib.dump(model, MODEL_PATH)
-
     print(f"\nModel saved to: {MODEL_PATH}")
 
 

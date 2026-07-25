@@ -1,0 +1,18 @@
+# Large data files (exceed GitHub's 100 MB limit)
+app/data/amazon_listing_review.csv
+app/data/combined_reviews.csv
+app/data/embeddings/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.idea/
+
+# Trained models (large binaries — store separately)
+app/model/*.joblib
+app/model/*.keras
+app/model/*.h5
+app/model/*.pkl
