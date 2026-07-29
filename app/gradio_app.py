@@ -45,21 +45,28 @@ for name, path in MODELS.items():
         print(f"  ✗  {name}  (not trained yet — skipped)")
 
 
+def _verdict_md(is_positive: bool) -> str:
+    return "### 🟢 POSITIVE" if is_positive else "### 🔴 NEGATIVE"
+
+
 def analyse(review_text: str, category: str):
     if not review_text.strip():
-        return [gr.update(visible=False)] * len(MODELS)
+        return [{"no input": 1.0}] * len(MODELS) + [""] * len(MODELS)
 
-    outputs = []
+    label_outputs   = []
+    verdict_outputs = []
     for name, model in loaded.items():
         if model is None:
-            outputs.append({"Model not trained yet": 1.0})
+            label_outputs.append({"Model not trained yet": 1.0})
+            verdict_outputs.append("### ⚪ NOT TRAINED")
         else:
-            probs = model.predict_proba([review_text])[0]
-            outputs.append({
-                "positive": round(float(probs[1]), 4),
-                "negative": round(float(probs[0]), 4),
-            })
-    return outputs
+            probs     = model.predict_proba([review_text])[0]
+            pos_prob  = round(float(probs[1]), 4)
+            neg_prob  = round(float(probs[0]), 4)
+            threshold = getattr(model, "THRESHOLD", 0.5)
+            label_outputs.append({"positive": pos_prob, "negative": neg_prob})
+            verdict_outputs.append(_verdict_md(pos_prob >= threshold))
+    return label_outputs + verdict_outputs
 
 
 with gr.Blocks(title="E-Commerce Sentiment Analyser", theme=gr.themes.Soft()) as demo:
@@ -89,21 +96,26 @@ with gr.Blocks(title="E-Commerce Sentiment Analyser", theme=gr.themes.Soft()) as
     gr.Markdown("---")
     gr.Markdown("### Results")
 
-    model_names = list(loaded.keys())
-    output_labels = []
+    model_names     = list(loaded.keys())
+    output_labels   = []
+    output_verdicts = []
 
     with gr.Row():
         for name in model_names[:2]:
             with gr.Column():
                 gr.Markdown(f"**{name}**")
+                vrd = gr.Markdown("")
                 lbl = gr.Label(num_top_classes=2, label=name)
+                output_verdicts.append(vrd)
                 output_labels.append(lbl)
 
     with gr.Row():
         for name in model_names[2:]:
             with gr.Column():
                 gr.Markdown(f"**{name}**")
+                vrd = gr.Markdown("")
                 lbl = gr.Label(num_top_classes=2, label=name)
+                output_verdicts.append(vrd)
                 output_labels.append(lbl)
 
     gr.Markdown("---")
@@ -119,16 +131,18 @@ with gr.Blocks(title="E-Commerce Sentiment Analyser", theme=gr.themes.Soft()) as
         """
     )
 
+    all_outputs = output_labels + output_verdicts
+
     analyse_btn.click(
         fn=analyse,
         inputs=[review_input, category_input],
-        outputs=output_labels,
+        outputs=all_outputs,
     )
 
     review_input.submit(
         fn=analyse,
         inputs=[review_input, category_input],
-        outputs=output_labels,
+        outputs=all_outputs,
     )
 
     gr.Examples(

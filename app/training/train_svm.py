@@ -10,6 +10,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.svm import LinearSVC
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
+from app.training.plot_utils import save_confusion_matrix, save_classification_report
 
 from app.training.train_logistic_regression import load_and_prepare_data, load_combined_data, DATA_PATH
 
@@ -33,7 +34,7 @@ def train_model(use_combined: bool = False):
     # CalibratedClassifierCV wraps it to add predict_proba support.
     svm = LinearSVC(
         C=0.5,
-        max_iter=2000,
+        max_iter=20000,
         class_weight="balanced",
         random_state=42,
     )
@@ -63,6 +64,10 @@ def train_model(use_combined: bool = False):
     os.makedirs(MODEL_PATH.parent, exist_ok=True)
     joblib.dump(model, MODEL_PATH)
     print(f"\nModel saved to: {MODEL_PATH}")
+
+    print("\nSaving plots …")
+    save_confusion_matrix(y_test, y_pred, "tfidf_svm")
+    save_classification_report(y_test, y_pred, "tfidf_svm")
 
 
 if __name__ == "__main__":

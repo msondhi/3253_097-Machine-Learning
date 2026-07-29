@@ -10,6 +10,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
+from app.training.plot_utils import save_confusion_matrix, save_classification_report
 
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -70,7 +71,7 @@ def train_model(use_combined: bool = False):
         )),
         ("classifier", LogisticRegression(
             C=0.3,
-            max_iter=1000,
+            max_iter=10000,
             class_weight="balanced"
         ))
     ])
@@ -89,6 +90,10 @@ def train_model(use_combined: bool = False):
     joblib.dump(model, MODEL_PATH)
 
     print(f"\nModel saved to: {MODEL_PATH}")
+
+    print("\nSaving plots …")
+    save_confusion_matrix(y_test, y_pred, "tfidf_lr")
+    save_classification_report(y_test, y_pred, "tfidf_lr")
 
 
 if __name__ == "__main__":

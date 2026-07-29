@@ -1,56 +1,62 @@
+"""
+Train Logistic Regression on pre-computed BGE embeddings.
+Run generate_bge_embeddings.py first.
+
+Usage
+-----
+python -m app.training.train_bge_logistic_regression --combined --balance
+python -m app.training.train_bge_logistic_regression --combined --limit 50000
+"""
+
 import argparse
 import os
 from pathlib import Path
 
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
 import joblib
-from sentence_transformers import SentenceTransformer
+import numpy as np
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
 
 from app.training.bge_model import BGELogisticRegressionModel
-from app.training.train_logistic_regression import load_and_prepare_data, load_combined_data
+from app.training.plot_utils import save_confusion_matrix, save_classification_report
 
-PROJECT_ROOT = Path(__file__).parent.parent.parent
-MODEL_PATH = PROJECT_ROOT / "app" / "model" / "sentiment_model_bge.joblib"
+PROJECT_ROOT     = Path(__file__).parent.parent.parent
+EMBEDDINGS_DIR   = PROJECT_ROOT / "app" / "data" / "embeddings"
+MODEL_PATH       = PROJECT_ROOT / "app" / "model" / "sentiment_model_bge.joblib"
 
-EMBEDDING_MODEL_NAME = "BAAI/bge-base-en-v1.5"
+EMBEDDING_MODEL_NAME = "BAAI/bge-small-en-v1.5"
 
 
-def train_model(use_combined: bool = False):
-    X, y = load_combined_data() if use_combined else load_and_prepare_data()
-    print(f"Dataset: {'combined' if use_combined else 'clothing'} — {len(X):,} samples")
+def load_embeddings(use_combined: bool, limit: int | None = None, balance: bool = False) -> tuple:
+    dataset_tag = "combined" if use_combined else "clothing"
+    tag_suffix  = f"_limit{limit}" if limit else ""
+    if balance:
+        tag_suffix += "_balanced"
+    path = EMBEDDINGS_DIR / f"bge_{dataset_tag}{tag_suffix}.npz"
+    if not path.exists():
+        cmd = "python -m app.training.generate_bge_embeddings"
+        if use_combined: cmd += " --combined"
+        if limit:        cmd += f" --limit {limit}"
+        if balance:      cmd += " --balance"
+        available = sorted(EMBEDDINGS_DIR.glob("*.npz"))
+        hint = "\nAvailable embedding files:\n" + "\n".join(f"  {f.name}" for f in available) if available else "\nNo embedding files found in embeddings/."
+        raise FileNotFoundError(f"Embeddings not found at {path}.\nRun first: {cmd}{hint}")
+    data = np.load(path)
+    return data["X_train"], data["X_test"], data["y_train"], data["y_test"]
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X,
-        y,
-        test_size=0.2,
-        random_state=42,
-        stratify=y,
-    )
 
-    print(f"Loading encoder: {EMBEDDING_MODEL_NAME}")
-    encoder = SentenceTransformer(EMBEDDING_MODEL_NAME, device="cpu")
+def train_model(use_combined: bool = False, limit: int | None = None, balance: bool = False):
+    tag = ("combined" if use_combined else "clothing") + (f" limit={limit}" if limit else "") + (" balanced" if balance else "")
+    print(f"Loading pre-computed embeddings ({tag}) …")
+    X_train_emb, X_test_emb, y_train, y_test = load_embeddings(use_combined, limit, balance)
+    print(f"  X_train : {X_train_emb.shape}")
+    print(f"  X_test  : {X_test_emb.shape}")
 
-    print(f"Embedding {len(X_train):,} training samples …")
-    X_train_emb = encoder.encode(
-        X_train.tolist(),
-        normalize_embeddings=True,
-        show_progress_bar=True,
-        batch_size=64,
-    )
+    pos = (y_train == 1).sum()
+    neg = (y_train == 0).sum()
+    print(f"  Labels  : negative={neg:,}  positive={pos:,}")
 
-    print(f"Embedding {len(X_test):,} test samples …")
-    X_test_emb = encoder.encode(
-        X_test.tolist(),
-        normalize_embeddings=True,
-        show_progress_bar=True,
-        batch_size=64,
-    )
-
-    print("Training LogisticRegression on BGE embeddings …")
+    print("\nTraining LogisticRegression on BGE embeddings …")
     classifier = LogisticRegression(
         C=1.0,
         max_iter=1000,
@@ -61,21 +67,30 @@ def train_model(use_combined: bool = False):
 
     y_pred = classifier.predict(X_test_emb)
 
-    print("Accuracy:", accuracy_score(y_test, y_pred))
+    print("\nAccuracy:", accuracy_score(y_test, y_pred))
     print("\nClassification Report:")
     print(classification_report(y_test, y_pred, target_names=["negative", "positive"]))
     print("\nConfusion Matrix:")
     print(confusion_matrix(y_test, y_pred))
 
+    # Build wrapper with lazy encoder (loaded only at inference time)
+    from sentence_transformers import SentenceTransformer
+    encoder = SentenceTransformer(EMBEDDING_MODEL_NAME, device="cpu")
     model = BGELogisticRegressionModel(encoder=encoder, classifier=classifier)
 
     os.makedirs(MODEL_PATH.parent, exist_ok=True)
     joblib.dump(model, MODEL_PATH)
     print(f"\nModel saved to: {MODEL_PATH}")
 
+    print("\nSaving plots …")
+    save_confusion_matrix(y_test, y_pred, "bge_lr")
+    save_classification_report(y_test, y_pred, "bge_lr")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--combined", action="store_true", help="Train on combined_reviews.csv instead of clothing only")
+    parser.add_argument("--combined", action="store_true",   help="Use combined embeddings")
+    parser.add_argument("--limit",   type=int, default=None, help="Must match the limit used in generate_bge_embeddings")
+    parser.add_argument("--balance", action="store_true",    help="Must match the --balance flag used in generate_bge_embeddings")
     args = parser.parse_args()
-    train_model(use_combined=args.combined)
+    train_model(use_combined=args.combined, limit=args.limit, balance=args.balance)

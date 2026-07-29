@@ -7,3 +7,4 @@ pandas>=2.0.0
 sentence-transformers>=3.0.0
 tensorflow>=2.16.0
 gradio>=4.0.0
+matplotlib>=3.8.0
